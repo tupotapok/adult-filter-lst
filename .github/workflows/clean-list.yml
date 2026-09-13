@@ -1,8 +1,8 @@
 name: Generate Clean Domain List
 on:
   schedule:
-    - cron: '0 3 * * *' # Автоматический запуск каждый день в 03:00
-  workflow_dispatch: # Кнопка для ручного запуска
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -10,13 +10,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Download and clean list
+      - name: Download, clean and merge lists
         run: |
-          curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" | sed -E 's/^([+*]\.)//' > porn.lst
+          # 1. Скачиваем основной список и очищаем его от префиксов, сохраняем в adult.lst
+          curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" | sed -E 's/^([+*]\.)//' > adult.lst
+          
+          # 2. Если существует файл custom.lst, добавляем его содержимое в конец
+          if [ -f custom.lst ]; then
+            echo "" >> adult.lst
+            cat custom.lst >> adult.lst
+          fi
           
       - name: Commit changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
-          git add porn.lst
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update clean porn.lst" && git push)
+          git add adult.lst
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update clean adult.lst with custom domains" && git push)
