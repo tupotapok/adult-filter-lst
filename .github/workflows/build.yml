@@ -2,10 +2,10 @@ name: Build Adult LST and SRS
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Ежедневное автообновление в 03:00
+    - cron: '0 3 * * *'
   push:
     paths:
-      - 'custom.lst' # Моментальный запуск при редактировании ваших доменов
+      - 'custom.lst'
   workflow_dispatch:
 
 jobs:
@@ -20,9 +20,19 @@ jobs:
 
       - name: Скачивание, очистка и слияние списков
         run: |
+          # Скачиваем оригинал и очищаем его от префиксов
           curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" | sed -E 's/^([+*]\.)//' > upstream.tmp
+          
+          # Принудительно добавляем пустую строку в конец оригинала, чтобы избежать слипания доменов
+          echo "" >> upstream.tmp
+          
+          # Убеждаемся, что custom.lst существует
           touch custom.lst
+          
+          # Объединяем, убираем пустые строки, сортируем и удаляем дубликаты
           cat upstream.tmp custom.lst | grep -v "^$" | sort -u > adult.lst
+          
+          # Удаляем временный файл
           rm upstream.tmp
 
       - name: Настройка Python
@@ -50,4 +60,3 @@ jobs:
           git add adult.lst adult.json adult.srs
           git commit -m "Автоматическая сборка adult.lst и adult.srs" || echo "Нет изменений для коммита"
           git push
-
