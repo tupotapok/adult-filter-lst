@@ -1,0 +1,53 @@
+name: Build Adult LST and SRS
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # Ежедневное автообновление в 03:00
+  push:
+    paths:
+      - 'custom.lst' # Моментальный запуск при редактировании ваших доменов
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Клонирование репозитория
+        uses: actions/checkout@v4
+
+      - name: Скачивание, очистка и слияние списков
+        run: |
+          curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" | sed -E 's/^([+*]\.)//' > upstream.tmp
+          touch custom.lst
+          cat upstream.tmp custom.lst | grep -v "^$" | sort -u > adult.lst
+          rm upstream.tmp
+
+      - name: Настройка Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Конвертация LST в JSON
+        run: python convert.py
+
+      - name: Скачивание и установка sing-box
+        run: |
+          wget https://github.com/SagerNet/sing-box/releases/download/v1.10.1/sing-box-1.10.1-linux-amd64.tar.gz
+          tar -xzf sing-box-1.10.1-linux-amd64.tar.gz
+          mv sing-box-*/sing-box ./sing-box
+          chmod +x sing-box
+
+      - name: Компиляция SRS
+        run: ./sing-box rule-set compile adult.json -o adult.srs
+
+      - name: Отправка готовых файлов в репозиторий
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add adult.lst adult.json adult.srs
+          git commit -m "Автоматическая сборка adult.lst и adult.srs" || echo "Нет изменений для коммита"
+          git push
+
