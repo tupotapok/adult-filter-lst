@@ -1,0 +1,51 @@
+name: Auto-Update Riot List
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install sing-box and jq
+        run: |
+          sudo bash -c "$(curl -fsSL https://sing-box.app/deb-install.sh)"
+          sudo apt-get install -y sing-box jq
+
+      - name: Download and clean Riot list
+        run: |
+          # Скачиваем список riot и очищаем его от префиксов MetaCubeX
+          curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/riot.list" \
+            | grep -v -E "^(regexp|keyword):" \
+            | sed -E 's/^(full:|domain:|\+\.)//g' \
+            | sed 's/@.*//' \
+            | tr -d '\r' | awk 'NF {print $1}' | sort -u > riot.lst
+
+      - name: Convert to JSON and Compile to SRS
+        run: |
+          # Конвертируем в headless JSON формат для sing-box
+          jq -Rn '{version: 1, rules: [{domain_suffix: [inputs | select(length>0)]}]}' riot.lst > riot.json
+          
+          # Компилируем бинарную базу srs
+          sing-box rule-set compile riot.json -o riot.srs
+
+      - name: Commit and Push changes
+        run: |
+          # Отправка готовых файлов
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add riot.lst riot.json riot.srs
+          
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-update: Riot rule-set"
+            git push
+          else
+            echo "No changes to commit, skipping push."
+          fi
