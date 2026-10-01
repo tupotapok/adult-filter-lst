@@ -1,0 +1,64 @@
+name: Auto-Update Filter Lists
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # Автоматический запуск каждый день в 03:00 (UTC)
+  workflow_dispatch: # Позволяет запускать скрипт вручную по кнопке "Run workflow"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install sing-box and jq
+        run: |
+          sudo bash -c "$(curl -fsSL https://sing-box.app/deb-install.sh)"
+          sudo apt-get install -y sing-box jq
+
+      - name: Download and clean lists
+        run: |
+          # 1. Скачиваем Russia Inside (inside-raw.lst содержит чистые домены)
+          curl -sL "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst" \
+            | tr -d '\r' | awk '{print $1}' | select(length>0) | sort -u > ri_raw.lst
+          
+          # 2. Скачиваем category-porn и очищаем от префиксов (geosite формат)
+          # Удаляем регулярки и ключевые слова, вырезаем префиксы (full:, domain:, +.), отсекаем теги вроде @cn
+          curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" \
+            | grep -v -E "^(regexp|keyword):" \
+            | sed -E 's/^(full:|domain:|\+\.)//g' \
+            | sed 's/@.*//' \
+            | tr -d '\r' | awk '{print $1}' | sort -u > porn_clean.lst
+
+      - name: Generate lists (RI.lst and PB.lst)
+        run: |
+          # 3. Создаем RI.lst (Russia Inside без доменов для взрослых)
+          comm -23 ri_raw.lst porn_clean.lst > RI.lst
+
+          # 4. Создаем PB.lst (custom.lst + category-porn)
+          # touch предотвращает ошибку, если файла custom.lst еще нет в репозитории
+          touch custom.lst
+          cat custom.lst porn_clean.lst | tr -d '\r' | awk 'NF' | sort -u > PB.lst
+
+      - name: Convert to JSON and Compile to SRS
+        run: |
+          # 5. Конвертируем в headless JSON формат для sing-box
+          jq -Rn '{version: 1, rules: [{domain_suffix: [inputs | select(length>0)]}]}' RI.lst > RIJ.json
+          jq -Rn '{version: 1, rules: [{domain_suffix: [inputs | select(length>0)]}]}' PB.lst > PBJ.json
+          
+          # Компилируем бинарные базы srs
+          sing-box rule-set compile RIJ.json -o RIS.srs
+          sing-box rule-set compile PBJ.json -o PBS.srs
+
+      - name: Commit and Push changes
+        run: |
+          # 6. Отправка готовых файлов в репозиторий
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          git add RI.lst PB.lst RIJ.json PBJ.json RIS.srs PBS.srs
+          
+          # git diff проверит, изменилось ли содержимое. Коммит создастся только если списки обновились.
+          git diff --staged --quiet || (git commit -m "Auto-update: RI and PB rule-sets" && git push)
