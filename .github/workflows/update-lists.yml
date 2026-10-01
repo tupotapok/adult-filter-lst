@@ -2,8 +2,8 @@ name: Auto-Update Filter Lists
 
 on:
   schedule:
-    - cron: '0 3 * * *' # Автоматический запуск каждый день в 03:00 (UTC)
-  workflow_dispatch: # Позволяет запускать скрипт вручную по кнопке "Run workflow"
+    - cron: '0 3 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,17 +20,16 @@ jobs:
 
       - name: Download and clean lists
         run: |
-          # 1. Скачиваем Russia Inside (inside-raw.lst содержит чистые домены)
+          # 1. Скачиваем Russia Inside и удаляем пустые строки через awk 'NF'
           curl -sL "https://raw.githubusercontent.com/itdoginfo/allow-domains/main/Russia/inside-raw.lst" \
-            | tr -d '\r' | awk '{print $1}' | select(length>0) | sort -u > ri_raw.lst
+            | tr -d '\r' | awk 'NF {print $1}' | sort -u > ri_raw.lst
           
-          # 2. Скачиваем category-porn и очищаем от префиксов (geosite формат)
-          # Удаляем регулярки и ключевые слова, вырезаем префиксы (full:, domain:, +.), отсекаем теги вроде @cn
+          # 2. Скачиваем category-porn и очищаем от префиксов
           curl -sL "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-porn.list" \
             | grep -v -E "^(regexp|keyword):" \
             | sed -E 's/^(full:|domain:|\+\.)//g' \
             | sed 's/@.*//' \
-            | tr -d '\r' | awk '{print $1}' | sort -u > porn_clean.lst
+            | tr -d '\r' | awk 'NF {print $1}' | sort -u > porn_clean.lst
 
       - name: Generate lists (RI.lst and PB.lst)
         run: |
@@ -38,9 +37,8 @@ jobs:
           comm -23 ri_raw.lst porn_clean.lst > RI.lst
 
           # 4. Создаем PB.lst (custom.lst + category-porn)
-          # touch предотвращает ошибку, если файла custom.lst еще нет в репозитории
           touch custom.lst
-          cat custom.lst porn_clean.lst | tr -d '\r' | awk 'NF' | sort -u > PB.lst
+          cat custom.lst porn_clean.lst | tr -d '\r' | awk 'NF {print $1}' | sort -u > PB.lst
 
       - name: Convert to JSON and Compile to SRS
         run: |
@@ -60,5 +58,10 @@ jobs:
           
           git add RI.lst PB.lst RIJ.json PBJ.json RIS.srs PBS.srs
           
-          # git diff проверит, изменилось ли содержимое. Коммит создастся только если списки обновились.
-          git diff --staged --quiet || (git commit -m "Auto-update: RI and PB rule-sets" && git push)
+          # Проверяем, есть ли изменения. Если есть — делаем коммит и пуш.
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-update: RI and PB rule-sets"
+            git push
+          else
+            echo "No changes to commit, skipping push."
+          fi
